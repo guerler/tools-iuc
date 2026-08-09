@@ -1,0 +1,360 @@
+name: Async submission comparison test
+# Runs tools-iuc under the async submission path (POST /api/jobs) vs. the sync path
+# (POST /api/tools) against the SAME Galaxy build, and diffs the result per
+# (tool_id, test_index). The `scope` input selects the repositories: `full` discovers
+# all of them via the planemo-ci-action with no PR diff base (like the weekly global
+# run), `regression` and `minimal` read their fixed lists. delta.md records which
+# scope produced it.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'minimal = a few basic tools (fast smoke test); regression = tools in async-regression-repos.txt; full = entire suite'
+        type: choice
+        options: [minimal, regression, full]
+        default: regression
+env:
+  GALAXY_FORK: guerler
+  GALAXY_BRANCH: toolrequests.005
+  MAX_CHUNKS: 120
+  PYTHON_VERSION: '3.11'
+  # Custom planemo (async-submission branch). Stock PyPI planemo is used for the
+  # sync-mode matrix entry so both modes exercise the same request path except
+  # for planemo's submission target: /api/jobs (async) vs /api/tools (sync).
+  CUSTOM_PLANEMO_VERSION: "git+https://github.com/guerler/planemo.git@async-submission"
+jobs:
+  setup:
+    name: Discover all repositories and chunks
+    runs-on: ubuntu-latest
+    outputs:
+      galaxy-head-sha: ${{ steps.get-galaxy-sha.outputs.galaxy-head-sha }}
+      repository-list: ${{ steps.full.outputs.repository-list || steps.fixed.outputs.repository-list || steps.minimal.outputs.repository-list }}
+      chunk-count: ${{ steps.discover.outputs.chunk-count || steps.fixed.outputs.chunk-count || steps.minimal.outputs.chunk-count }}
+      chunk-list: ${{ steps.discover.outputs.chunk-list || steps.fixed.outputs.chunk-list || steps.minimal.outputs.chunk-list }}
+    steps:
+    - name: Determine latest commit in the Galaxy repo
+      id: get-galaxy-sha
+      run: echo "galaxy-head-sha=$(git ls-remote https://github.com/${{ env.GALAXY_FORK }}/galaxy refs/heads/${{ env.GALAXY_BRANCH }} | cut -f1)" >> $GITHUB_OUTPUT
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      id: cache-pip
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ steps.get-galaxy-sha.outputs.galaxy-head-sha }}
+    - name: Install wheel
+      run: pip install wheel
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    # full scope: no PR diff base, so the action discovers ALL tool repositories
+    # (same as the weekly global run) and splits them into chunks.
+    - name: Discover all repositories and chunks
+      if: ${{ inputs.scope == 'full' }}
+      uses: galaxyproject/planemo-ci-action@v1
+      id: discover
+      with:
+        create-cache: ${{ steps.cache-pip.outputs.cache-hit != 'true' }}
+        galaxy-fork: ${{ env.GALAXY_FORK }}
+        galaxy-branch: ${{ env.GALAXY_BRANCH }}
+        max-chunks: ${{ env.MAX_CHUNKS }}
+        python-version: ${{ env.PYTHON_VERSION }}
+    # full scope excludes known-hanging repos: mothur/mmseqs2 (e.g. align.seqs
+    # blast) ignore test_timeout and would burn the job ceiling in both modes.
+    - name: Drop hanging repos from full discovery
+      if: ${{ inputs.scope == 'full' }}
+      id: full
+      env:
+        DISCOVERED: ${{ steps.discover.outputs.repository-list }}
+      run: |
+        set -euo pipefail
+        repos=$(printf '%s\n' "$DISCOVERED" | grep -vE '/(mothur|mmseqs2)$' || true)
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        echo "Full scope: $(printf '%s\n' "$repos" | grep -c .) repositories after excluding mothur/mmseqs2"
+    # regression scope: fixed repository list from async-regression-repos.txt
+    # (the tools that regressed on the async path), sharded into 8 chunks.
+    - name: Use fixed regression repository list
+      if: ${{ inputs.scope == 'regression' }}
+      id: fixed
+      run: |
+        set -euo pipefail
+        list_file=.github/workflows/async-regression-repos.txt
+        repos=$(grep -vE '^[[:space:]]*($|#)' "$list_file")
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        n=16
+        echo "chunk-count=$n" >> "$GITHUB_OUTPUT"
+        python3 -c "import json; print('chunk-list=' + json.dumps(list(range($n))))" >> "$GITHUB_OUTPUT"
+        echo "Scoped to $(printf '%s\n' "$repos" | grep -c .) repositories across $n chunks"
+    # minimal scope: a tiny fixed list of basic tools from async-minimal-repos.txt
+    # for a fast smoke test of the async submission path (single chunk).
+    - name: Use minimal smoke-test repository list
+      if: ${{ inputs.scope == 'minimal' }}
+      id: minimal
+      run: |
+        set -euo pipefail
+        list_file=.github/workflows/async-minimal-repos.txt
+        repos=$(grep -vE '^[[:space:]]*($|#)' "$list_file")
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        n=1
+        echo "chunk-count=$n" >> "$GITHUB_OUTPUT"
+        python3 -c "import json; print('chunk-list=' + json.dumps(list(range($n))))" >> "$GITHUB_OUTPUT"
+        echo "Minimal smoke test: $(printf '%s\n' "$repos" | grep -c .) repositories"
+
+  test:
+    # Two runs per chunk (async, sync) against the same Galaxy build. The diff step
+    # compares status per (tool_id, test_index) across the two modes.
+    name: Test tools (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: setup
+    if: ${{ needs.setup.outputs.repository-list != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: ${{ fromJson(needs.setup.outputs.chunk-list) }}
+        mode: [async, sync]
+    services:
+      postgres:
+        image: postgres:11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ needs.setup.outputs.galaxy-head-sha }}
+    - name: Get number of CPU cores
+      uses: SimenB/github-actions-cpu-cores@v3
+      id: cpu-cores
+    - name: Clean dotnet folder for space
+      run: rm -Rf /usr/share/dotnet
+    # async: guerler/planemo@async-submission defaults --use_async_submission=True
+    #   which routes to POST /api/jobs via use_legacy_api="never".
+    # sync: stock PyPI planemo. Submits to POST /api/tools.
+    - name: Planemo test
+      uses: galaxyproject/planemo-ci-action@v1
+      with:
+        mode: test
+        planemo-version: ${{ matrix.mode == 'async' && env.CUSTOM_PLANEMO_VERSION || 'planemo' }}
+        repository-list: ${{ needs.setup.outputs.repository-list }}
+        galaxy-fork: ${{ env.GALAXY_FORK }}
+        galaxy-branch: ${{ env.GALAXY_BRANCH }}
+        chunk: ${{ matrix.chunk }}
+        chunk-count: ${{ needs.setup.outputs.chunk-count }}
+        galaxy-slots: ${{ steps.cpu-cores.outputs.count }}
+        test_timeout: 900
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 'Tool test output ${{ matrix.mode }} ${{ matrix.chunk }}'
+        path: upload
+    # Async 'state failed' is raised in the Galaxy celery worker (queue_jobs logs it
+    # via log.exception), so the real traceback lives in the server/worker logs, not
+    # in the planemo test output. Capture those logs for the async mode so we can see
+    # why requests fail instead of only the empty err_msg.
+    - name: Collect Galaxy server logs (async)
+      if: ${{ always() && matrix.mode == 'async' }}
+      run: |
+        mkdir -p galaxy-logs
+        find "$GITHUB_WORKSPACE" "$HOME" /tmp -type f -name '*.log' 2>/dev/null \
+          | grep -iE 'gravity|celery|handler|gunicorn|uwsgi|galaxy|planemo' \
+          | head -300 \
+          | while read -r f; do
+              cp "$f" "galaxy-logs/$(echo "$f" | tr '/ ' '__')" 2>/dev/null || true
+            done
+        echo "Collected $(ls galaxy-logs 2>/dev/null | wc -l) log file(s)"
+        {
+          echo '### Async request-processing errors (Galaxy worker)';
+          echo '```';
+          grep -rhA 30 'Problem validating tool state' galaxy-logs 2>/dev/null | head -80;
+          echo '```';
+        } >> "$GITHUB_STEP_SUMMARY" || true
+    - name: Upload Galaxy server logs (async)
+      if: ${{ always() && matrix.mode == 'async' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'Galaxy server log ${{ matrix.chunk }}'
+        path: galaxy-logs
+        if-no-files-found: warn
+
+  combine_outputs:
+    name: Combine chunked test results (${{ matrix.mode }})
+    needs: [setup, test]
+    if: ${{ always() && needs.setup.outputs.repository-list != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [async, sync]
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: 'Tool test output ${{ matrix.mode }} *'
+        path: artifacts
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ needs.setup.outputs.galaxy-head-sha }}
+    - name: Combine outputs
+      uses: galaxyproject/planemo-ci-action@v1
+      with:
+        mode: combine
+        html-report: true
+        markdown-report: true
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 'All tool test results ${{ matrix.mode }}'
+        path: upload
+    - run: |
+        echo "## ${{ matrix.mode }} mode" >> $GITHUB_STEP_SUMMARY
+        cat upload/tool_test_output.md >> $GITHUB_STEP_SUMMARY
+
+  diff:
+    # Compares status per (tool_id, test_index) between the two modes. Fails
+    # the workflow if any test passes in sync but not in async (== a real
+    # framework delta in the toolrequests /api/jobs code path).
+    name: Diff async vs sync
+    needs: [setup, combine_outputs]
+    if: ${{ always() && needs.setup.outputs.repository-list != '' }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: 'All tool test results *'
+        path: results
+    - name: Compute delta
+      # ubuntu-latest ships python3 preinstalled.
+      # Extracts status + error snippet for each (tool_id, test_index) from
+      # each mode's combined JSON, then classifies:
+      #   sync=success async=success  -> agree pass
+      #   sync=success async!=success -> ASYNC REGRESSION (framework bug candidate)
+      #   sync!=success async=success -> async pass-only (informational)
+      #   sync!=success async!=success -> agree fail
+      # A "missing" bucket catches tests that appear in only one mode's JSON,
+      # which usually means a chunk crashed before emitting results.
+      run: |
+        set -euo pipefail
+        ASYNC_JSON="results/All tool test results async/tool_test_output.json"
+        SYNC_JSON="results/All tool test results sync/tool_test_output.json"
+        if [ ! -f "$ASYNC_JSON" ] || [ ! -f "$SYNC_JSON" ]; then
+          echo "Missing artifact: one of the modes did not produce a combined output"
+          ls -la results/
+          exit 1
+        fi
+        python3 - "$ASYNC_JSON" "$SYNC_JSON" "${{ inputs.scope }}" <<'PY'
+        import json, sys
+        _, async_path, sync_path, scope = sys.argv
+
+        def load(path):
+            with open(path) as f:
+                doc = json.load(f)
+            out = {}
+            for entry in doc.get("tests", []):
+                data = entry.get("data") or {}
+                tool_id = data.get("tool_id")
+                idx = data.get("test_index")
+                status = data.get("status", "missing")
+                err = (data.get("problem_log") or "").strip()
+                if not err:
+                    err = (data.get("output_problems") or [""])[0]
+                if not err:
+                    # Errored tests where the async request-build itself failed have no job
+                    # and no output_problems; the reason lives in execution_problem instead
+                    # (e.g. "could not build request: Ambiguous unqualified test parameter...").
+                    err = (data.get("execution_problem") or "").strip()
+                err = err.replace("\n", " ").strip()[:160]
+                out[f"{tool_id};{idx}"] = (status, err)
+            return out
+
+        a = load(async_path)
+        s = load(sync_path)
+        keys = sorted(set(a) | set(s))
+        regressions, pass_only, missing = [], [], []
+        agree_pass = agree_fail = 0
+        for k in keys:
+            av, ae = a.get(k, ("missing", ""))
+            sv, se = s.get(k, ("missing", ""))
+            if av == "missing" or sv == "missing":
+                missing.append((k, sv, av))
+            elif sv == "success" and av != "success":
+                regressions.append((k, sv, av, ae))
+            elif sv != "success" and av == "success":
+                pass_only.append((k, sv, av))
+            elif sv == "success":
+                agree_pass += 1
+            else:
+                agree_fail += 1
+
+        scope_source = {
+            "minimal": "the tools in `.github/workflows/async-minimal-repos.txt`",
+            "regression": "the repositories in `.github/workflows/async-regression-repos.txt`",
+            "full": "all discovered repositories, excluding mothur and mmseqs2",
+        }.get(scope, "an unrecognised scope")
+
+        with open("delta.md", "w") as f:
+            f.write(f"# async vs sync delta ({scope} scope)\n\n")
+            f.write(f"{len(keys)} test cases, covering {scope_source}.\n\n")
+            f.write("| bucket | count |\n|---|---|\n")
+            f.write(f"| agree pass | {agree_pass} |\n")
+            f.write(f"| agree fail | {agree_fail} |\n")
+            f.write(f"| **async regression (sync ok, async not ok)** | **{len(regressions)}** |\n")
+            f.write(f"| async pass-only (sync not ok, async ok) | {len(pass_only)} |\n")
+            f.write(f"| missing from one side | {len(missing)} |\n\n")
+            if regressions:
+                f.write(f"## async regressions ({len(regressions)})\n\n")
+                f.write("| tool;test_index | sync | async | async error (truncated) |\n|---|---|---|---|\n")
+                for k, sv, av, ae in regressions:
+                    f.write(f"| `{k}` | {sv} | {av} | {ae} |\n")
+                f.write("\n")
+            if pass_only:
+                f.write(f"## async pass-only ({len(pass_only)})\n\n")
+                f.write("| tool;test_index | sync | async |\n|---|---|---|\n")
+                for k, sv, av in pass_only:
+                    f.write(f"| `{k}` | {sv} | {av} |\n")
+                f.write("\n")
+            if missing:
+                f.write(f"## present in only one mode ({len(missing)})\n\n")
+                f.write("| tool;test_index | sync | async |\n|---|---|---|\n")
+                for k, sv, av in missing:
+                    f.write(f"| `{k}` | {sv} | {av} |\n")
+
+        print(f"regressions={len(regressions)} pass_only={len(pass_only)} "
+              f"agree_pass={agree_pass} agree_fail={agree_fail} missing={len(missing)}")
+        sys.exit(1 if regressions else 0)
+        PY
+    - name: Publish delta report to step summary
+      if: ${{ always() }}
+      run: cat delta.md >> $GITHUB_STEP_SUMMARY
+    - name: Upload delta artifact
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'async vs sync delta'
+        path: delta.md

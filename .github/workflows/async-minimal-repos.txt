@@ -1,0 +1,8 @@
+# Minimal smoke-test set for the async submission path.
+# A few small, fast, reliable tabular tools that exercise the basic input
+# types (data, text, select) end to end. Used by the 'minimal' scope of
+# async-submission-test.yaml to verify the /api/jobs request path quickly,
+# without running the regression or full suites.
+tools/column_maker
+tools/datamash
+tools/add_input_name_as_column
