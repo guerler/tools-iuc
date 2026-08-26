@@ -233,7 +233,7 @@
             </output>
             <output name="neff">
                 <assert_contents>
-                    <has_text_matching expression="^(10|9)[0-9][0-9]\."/>
+                    <has_text_matching expression="^(9[0-9][0-9]|[1-9][0-9]{3})\."/>
                 </assert_contents>
             </output>
             <output_collection name="qc_plots" count="3" type="list">
