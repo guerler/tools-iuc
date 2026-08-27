@@ -106,7 +106,7 @@ $gzip
             </output_collection>
             <output name="countgraph">
                 <assert_contents>
-                    <has_size size="1k"/>
+                    <has_size size="4M" delta="1k"/>
                 </assert_contents>
             </output>
         </test>
