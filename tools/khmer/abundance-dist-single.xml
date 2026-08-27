@@ -72,7 +72,7 @@ ${output_histogram_filename}
             </output>
             <output name="optional_output_countgraph">
                 <assert_contents>
-                    <has_size size="1k"/>
+                    <has_size size="20M" delta="1k"/>
                 </assert_contents>
             </output>
         </test>
