@@ -80,7 +80,7 @@
         <test>
             <param name="matrix" value="count/qcheck/matrix.counts.matrix"/>
             <param name="samples_file" value="count/samples.txt"/>
-            <param name="method" value="DESeq2"/>
+            <param name="method_choice|method" value="DESeq2"/>
             <output_collection name="DE_results">
                 <element name="input.matrix.wt_37_vs_wt_GSNO.DESeq2" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_GSNO.DESeq2.DE_results"/>
                 <element name="input.matrix.wt_37_vs_wt_ph8.DESeq2" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_ph8.DESeq2.DE_results"/>
@@ -100,7 +100,7 @@
         <test>
             <param name="matrix" value="count/qcheck/matrix.counts.matrix"/>
             <param name="samples_file" value="count/samples.txt"/>
-            <param name="method" value="edgeR"/>
+            <param name="method_choice|method" value="edgeR"/>
             <output_collection name="DE_results">
                 <element name="input.matrix.wt_37_vs_wt_GSNO.edgeR" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_GSNO.edgeR.DE_results"/>
                 <element name="input.matrix.wt_37_vs_wt_ph8.edgeR" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_ph8.edgeR.DE_results"/>
@@ -120,7 +120,7 @@
         <test>
             <param name="matrix" value="count/qcheck/matrix.counts.matrix"/>
             <param name="samples_file" value="count/samples.txt"/>
-            <param name="method" value="voom"/>
+            <param name="method_choice|method" value="voom"/>
             <output_collection name="DE_results">
                 <element name="input.matrix.wt_37_vs_wt_GSNO.voom" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_GSNO.voom.DE_results"/>
                 <element name="input.matrix.wt_37_vs_wt_ph8.voom" compare="sim_size" file="count/exp_diff/input.matrix.wt_37_vs_wt_ph8.voom.DE_results"/>
