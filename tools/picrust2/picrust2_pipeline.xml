@@ -139,27 +139,23 @@ picrust2_pipeline.py
     <tests>
         <test expect_num_outputs="5">
             <!-- place_seq -->
-            <param name="study_fasta" value="study_seqs_full.fasta"/>
-            <param name="placement_tool" value="sepp"/>
-            <param name="min_align" value="0.0"/>
+            <param name="place_seqs_section|study_fasta" value="study_seqs_full.fasta"/>
+            <param name="place_seqs_section|placement_tool" value="sepp"/>
+            <param name="place_seqs_section|min_align" value="0.0"/>
             <!-- hsp -->
-            <conditional name="trait_input">
-                <param name="selector" value="default"/>
-                <param name="in_traits" value="EC,COG"/>
-            </conditional>
-            <param name="skip_nsti" value="false"/>
+            <param name="hsp_section|trait_input|selector" value="default"/>
+            <param name="hsp_section|trait_input|in_traits" value="EC,COG"/>
+            <param name="hsp_section|skip_nsti" value="false"/>
             <!-- metagenome -->
-            <param name="input" value="workflow_seq_abun.biom"/>
-            <conditional name="input_options">
-                <param name="selector" value="ASV"/>
-                <param name="min_reads" value="1"/>
-                <param name="min_samples" value="1"/>
-            </conditional>
-            <param name="max_nsti" value="2.0"/>
-            <param name="skip_norm" value="false"/>
+            <param name="metagenome_pipeline_section|input" value="workflow_seq_abun.biom"/>
+            <param name="metagenome_pipeline_section|input_options|selector" value="ASV"/>
+            <param name="metagenome_pipeline_section|input_options|min_reads" value="1"/>
+            <param name="metagenome_pipeline_section|input_options|min_samples" value="1"/>
+            <param name="metagenome_pipeline_section|max_nsti" value="2.0"/>
+            <param name="metagenome_pipeline_section|skip_norm" value="false"/>
             <!-- pathway -->
-            <param name="skip_minpath" value="false"/>
-            <param name="no_gap_fill" value="true"/>
+            <param name="predict_pathways|skip_minpath" value="false"/>
+            <param name="predict_pathways|no_gap_fill" value="true"/>
 
             <param name="remove_intermediate" value="place_seqs"/>
             <output name="out_tree" ftype="newick">
@@ -243,27 +239,23 @@ picrust2_pipeline.py
         <!-- same as test 1, but only COG as in_traits (which has the same result since EC is added automatically), and test the other intermediate result -->
         <test expect_num_outputs="5">
             <!-- place_seq -->
-            <param name="study_fasta" value="study_seqs_full.fasta"/>
-            <param name="placement_tool" value="sepp"/>
-            <param name="min_align" value="0.0"/>
+            <param name="place_seqs_section|study_fasta" value="study_seqs_full.fasta"/>
+            <param name="place_seqs_section|placement_tool" value="sepp"/>
+            <param name="place_seqs_section|min_align" value="0.0"/>
             <!-- hsp -->
-            <conditional name="trait_input">
-                <param name="selector" value="default"/>
-                <param name="in_traits" value="COG"/>
-            </conditional>
-            <param name="skip_nsti" value="false"/>
+            <param name="hsp_section|trait_input|selector" value="default"/>
+            <param name="hsp_section|trait_input|in_traits" value="COG"/>
+            <param name="hsp_section|skip_nsti" value="false"/>
             <!-- metagenome -->
-            <param name="input" value="workflow_seq_abun.biom"/>
-            <conditional name="input_options">
-                <param name="selector" value="ASV"/>
-                <param name="min_reads" value="1"/>
-                <param name="min_samples" value="1"/>
-            </conditional>
-            <param name="max_nsti" value="2.0"/>
-            <param name="skip_norm" value="false"/>
+            <param name="metagenome_pipeline_section|input" value="workflow_seq_abun.biom"/>
+            <param name="metagenome_pipeline_section|input_options|selector" value="ASV"/>
+            <param name="metagenome_pipeline_section|input_options|min_reads" value="1"/>
+            <param name="metagenome_pipeline_section|input_options|min_samples" value="1"/>
+            <param name="metagenome_pipeline_section|max_nsti" value="2.0"/>
+            <param name="metagenome_pipeline_section|skip_norm" value="false"/>
             <!-- pathway -->
-            <param name="skip_minpath" value="false"/>
-            <param name="no_gap_fill" value="true"/>
+            <param name="predict_pathways|skip_minpath" value="false"/>
+            <param name="predict_pathways|no_gap_fill" value="true"/>
 
             <param name="remove_intermediate" value="pathways"/>
             <output name="out_tree" ftype="newick">
