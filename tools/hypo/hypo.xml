@@ -133,7 +133,7 @@
             <param name="size_ref" value="10k" />
             <param name="coverage_short" value="35"/>
             <param name="bam_sr" value="short_reads.bam" ftype="bam" />
-            <param name="log" value="true"/>
+            <param name="advanced_options|log" value="true"/>
             <output name="out_fasta" file="test_05.fasta" ftype="fasta" />
             <output name="out_log" ftype="txt">
                 <assert_contents>
