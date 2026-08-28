@@ -371,7 +371,7 @@
             </conditional>
             <param name="protein_fasta" value="input_query.fasta.gz" ftype="fasta"></param>
             <param name="output_format" value="gtf"></param>
-            <param name="ncbi_table" value="1"></param>
+            <param name="adv|ncbi_table" value="1"></param>
             <conditional name="adv">
                 <param name="options" value="yes"></param>
                 <section name="output">
@@ -391,7 +391,7 @@
                 <param name="genomic_fasta" value="input_genome.fasta.gz" ftype="fasta"></param>
             </conditional>
             <param name="protein_fasta" value="input_query.fasta.gz" ftype="fasta"></param>
-            <param name="spsc_file" value="spsc.tsv" ftype="tsv"></param>
+            <param name="splice|spsc_file" value="spsc.tsv" ftype="tsv"></param>
             <param name="output_format" value="gff"></param>
             <conditional name="adv">
                 <param name="options" value="yes"/>
