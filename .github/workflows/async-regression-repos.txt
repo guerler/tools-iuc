@@ -1,3 +1,11 @@
+# Repositories for `scope: regression` in async-submission-test.yaml.
+#
+# Every repository that has shown an async/sync asymmetry, in either direction. Tests are
+# never removed from this list once they appear: recurrence across runs is the evidence,
+# so a repository that has been fixed stays here to show it stays fixed.
+#
+# Asymmetric in the async-fails direction, or historically so.
+
 data_managers/data_manager_build_bakta_database
 data_managers/data_manager_build_kraken2_database
 tool_collections/samtools
@@ -44,3 +52,18 @@ tools/spapros
 tools/taffy
 tools/trinity
 tools/vcontact2
+
+# Asymmetric in the async-passes direction, surfaced by full-suite run 33791633481.
+# These were outside the regression scope, which is the gap the cross-run tables
+# had to caveat; a regression run now covers both directions.
+
+# sync substitutes defaults for declared booleans, 10 tests
+tools/stacks2
+tools/metaphlan
+tools/fastq_dl
+tools/kmer2stats
+tools/velvet
+tool_collections/fastx_toolkit/fastq_quality_filter
+# external network, expect noise from these two
+data_managers/data_manager_pangolearn
+data_managers/data_manager_mmseqs2_database
