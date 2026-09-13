@@ -1,0 +1,56 @@
+# Repositories for `scope: subset` in tool-suite-tests.yaml.
+#
+# Every package with at least one failing tool test: 155 tests across 73 tool ids,
+# resolving to the repositories below. Packages are not removed once their tests pass,
+# so a later run shows that they stay fixed.
+data_managers/data_manager_funannotate_options
+data_managers/data_manager_liana_resources
+data_managers/data_manager_omamer
+data_managers/data_manager_picard_index_builder
+tools/amrfinderplus
+tools/beacon2-import
+tools/bellavista
+tools/celltypist
+tools/colibread
+tools/delly
+tools/diffdock
+tools/disco
+tools/freyja
+tools/ggplot2
+tools/homer
+tools/idr_download
+tools/interval2maf
+tools/lofreq
+tools/lorikeet
+tools/lumpy_sv
+tools/maker
+tools/megahit
+tools/metaphlan
+tools/mg_toolkit
+tools/ncbi_datasets
+tools/ngmlr
+tools/openalex
+tools/optdoe
+tools/pairtools
+tools/pgxRpi
+tools/pyega3
+tools/pysradb
+tools/quast
+tools/query_impc
+tools/repeatmasker
+tools/rp2biosensor
+tools/rptools
+tools/sarscov2formatter
+tools/scop3p
+tools/scpipe
+tools/sickle
+tools/simtext
+tools/sopa
+tools/spades
+tools/spapros
+tools/spotyping
+tools/stacks2
+tools/trinity
+tools/trinotate
+tools/virannot
+tools/weather_app

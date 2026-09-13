@@ -1,0 +1,256 @@
+name: Tool suite tests
+# Runs the tool suite's own tests. `scope` selects the repositories: `subset` reads
+# tool-suite-subset-repos.txt, the packages with a known failing test; `full` discovers
+# every repository, as the weekly global run does.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'subset = packages in tool-suite-subset-repos.txt; full = entire suite'
+        type: choice
+        options: [subset, full]
+        default: subset
+      repositories:
+        description: 'Space or newline separated repository paths, to verify a fix without waiting for the whole subset. Overrides scope when set.'
+        type: string
+        default: ''
+env:
+  GALAXY_FORK: galaxyproject
+  GALAXY_BRANCH: dev
+  MAX_CHUNKS: 120
+  PYTHON_VERSION: '3.11'
+  # galaxy-tool-util's interactor defaults to use_legacy_api="always", and released planemo
+  # does not override it, so stock planemo submits to /api/tools. This branch defaults
+  # --use_async_submission=True, which is the path these tests exist to cover.
+  # Not named PLANEMO_*: planemo sets auto_envvar_prefix="PLANEMO", so such a variable
+  # is read as an option value and PLANEMO_VERSION lands on its --version flag.
+  ASYNC_PLANEMO: "git+https://github.com/guerler/planemo.git@async-submission"
+jobs:
+  setup:
+    name: Discover repositories and chunks
+    runs-on: ubuntu-latest
+    outputs:
+      galaxy-head-sha: ${{ steps.sha.outputs.galaxy-head-sha }}
+      repository-list: ${{ steps.explicit.outputs.repository-list || steps.full.outputs.repository-list || steps.subset.outputs.repository-list }}
+      chunk-count: ${{ steps.explicit.outputs.chunk-count || steps.full.outputs.chunk-count || steps.subset.outputs.chunk-count }}
+      chunk-list: ${{ steps.explicit.outputs.chunk-list || steps.full.outputs.chunk-list || steps.subset.outputs.chunk-list }}
+    steps:
+    - name: Determine latest commit in the Galaxy repo
+      id: sha
+      run: echo "galaxy-head-sha=$(git ls-remote https://github.com/${{ env.GALAXY_FORK }}/galaxy refs/heads/${{ env.GALAXY_BRANCH }} | cut -f1)" >> $GITHUB_OUTPUT
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      id: cache-pip
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ steps.sha.outputs.galaxy-head-sha }}
+    - name: Install wheel
+      run: pip install wheel
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - name: Use the repositories given on dispatch
+      if: ${{ inputs.repositories != '' }}
+      id: explicit
+      env:
+        REQUESTED: ${{ inputs.repositories }}
+      run: |
+        set -euo pipefail
+        repos=$(printf '%s\n' $REQUESTED)
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        echo "chunk-count=1" >> "$GITHUB_OUTPUT"
+        echo "chunk-list=[0]" >> "$GITHUB_OUTPUT"
+        echo "Explicit: $(printf '%s\n' "$repos" | grep -c .) repositories in one chunk"
+    # No PR diff base, so the action discovers every tool repository and chunks it.
+    - name: Discover every repository
+      if: ${{ inputs.repositories == '' && inputs.scope == 'full' }}
+      uses: galaxyproject/planemo-ci-action@v1
+      id: discover
+      with:
+        create-cache: ${{ steps.cache-pip.outputs.cache-hit != 'true' }}
+        galaxy-fork: ${{ env.GALAXY_FORK }}
+        galaxy-branch: ${{ env.GALAXY_BRANCH }}
+        max-chunks: ${{ env.MAX_CHUNKS }}
+        mode: setup
+    # mothur and mmseqs2 hang the runner, so the full scope leaves them out.
+    - name: Drop the repositories that hang
+      if: ${{ inputs.repositories == '' && inputs.scope == 'full' }}
+      id: full
+      env:
+        DISCOVERED: ${{ steps.discover.outputs.repository-list }}
+      run: |
+        set -euo pipefail
+        repos=$(printf '%s\n' "$DISCOVERED" | grep -vE '^tools/(mothur|mmseqs2)/?$' || true)
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        echo "chunk-count=${{ steps.discover.outputs.chunk-count }}" >> "$GITHUB_OUTPUT"
+        echo "chunk-list=${{ steps.discover.outputs.chunk-list }}" >> "$GITHUB_OUTPUT"
+        echo "Full scope: $(printf '%s\n' "$repos" | grep -c .) repositories"
+    - name: Read the subset repository list
+      if: ${{ inputs.repositories == '' && inputs.scope == 'subset' }}
+      id: subset
+      run: |
+        set -euo pipefail
+        repos=$(grep -vE '^[[:space:]]*($|#)' .github/workflows/tool-suite-subset-repos.txt)
+        {
+          echo "repository-list<<EOF"
+          echo "$repos"
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+        n=16
+        echo "chunk-count=$n" >> "$GITHUB_OUTPUT"
+        python3 -c "import json; print('chunk-list=' + json.dumps(list(range($n))))" >> "$GITHUB_OUTPUT"
+        echo "Subset scope: $(printf '%s\n' "$repos" | grep -c .) repositories across $n chunks"
+
+  test:
+    name: Test tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    needs: setup
+    if: ${{ needs.setup.outputs.repository-list != '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        chunk: ${{ fromJson(needs.setup.outputs.chunk-list) }}
+    services:
+      postgres:
+        image: postgres:11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ needs.setup.outputs.galaxy-head-sha }}
+    - name: Get number of CPU cores
+      uses: SimenB/github-actions-cpu-cores@v3
+      id: cpu-cores
+    - name: Clean dotnet folder for space
+      run: rm -Rf /usr/share/dotnet
+    - name: Planemo test
+      uses: galaxyproject/planemo-ci-action@v1
+      with:
+        mode: test
+        planemo-version: ${{ env.ASYNC_PLANEMO }}
+        repository-list: ${{ needs.setup.outputs.repository-list }}
+        galaxy-fork: ${{ env.GALAXY_FORK }}
+        galaxy-branch: ${{ env.GALAXY_BRANCH }}
+        chunk: ${{ matrix.chunk }}
+        chunk-count: ${{ needs.setup.outputs.chunk-count }}
+        galaxy-slots: ${{ steps.cpu-cores.outputs.count }}
+        test_timeout: 900
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 'Tool test output ${{ matrix.chunk }}'
+        path: upload
+    # A failed submission is raised in the Galaxy Celery worker, so the traceback lives
+    # in the worker log rather than in the planemo output.
+    - name: Collect Galaxy server logs
+      if: ${{ always() }}
+      run: |
+        mkdir -p galaxy-logs
+        find "$GITHUB_WORKSPACE" "$HOME" /tmp -type f -name '*.log' 2>/dev/null \
+          | grep -iE 'gravity|celery|handler|gunicorn|uwsgi|galaxy|planemo' \
+          | head -300 \
+          | while read -r f; do
+              cp "$f" "galaxy-logs/$(echo "$f" | tr '/ ' '__')" 2>/dev/null || true
+            done
+        echo "Collected $(ls galaxy-logs 2>/dev/null | wc -l) log file(s)"
+    - name: Upload Galaxy server logs
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'Galaxy server log ${{ matrix.chunk }}'
+        path: galaxy-logs
+        if-no-files-found: warn
+
+  combine_outputs:
+    name: Combine chunked test results
+    needs: [setup, test]
+    if: ${{ always() && needs.setup.outputs.repository-list != '' }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: 'Tool test output *'
+        path: artifacts
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    - name: Cache .cache/pip
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/pip
+        key: pip_cache_py_${{ env.PYTHON_VERSION }}_gxy_${{ needs.setup.outputs.galaxy-head-sha }}
+    - name: Combine outputs
+      uses: galaxyproject/planemo-ci-action@v1
+      with:
+        mode: combine
+        html-report: true
+        markdown-report: true
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 'All tool test results'
+        path: upload
+    # One row per failing test, so a run says what to fix rather than only how many.
+    - name: Report the failing tests
+      if: ${{ always() }}
+      run: |
+        set -euo pipefail
+        python3 - "upload/tool_test_output.json" "${{ inputs.scope }}" <<'PY'
+        import json, sys
+        _, path, scope = sys.argv
+        with open(path) as handle:
+            tests = json.load(handle).get("tests", [])
+        failing = []
+        for entry in tests:
+            data = entry.get("data") or {}
+            if data.get("status") == "success":
+                continue
+            error = (data.get("problem_log") or "").strip()
+            if not error:
+                error = ((data.get("output_problems") or [""])[0] or "").strip()
+            if not error:
+                error = (data.get("execution_problem") or "").strip()
+            failing.append((f'{data.get("tool_id")};{data.get("test_index")}',
+                            data.get("status", "missing"),
+                            error.replace("\n", " ").strip()[:160]))
+        with open("failures.md", "w") as out:
+            out.write(f"# Failing tool tests ({scope} scope)\n\n")
+            out.write(f"{len(tests)} tests ran, {len(failing)} did not succeed.\n\n")
+            if failing:
+                out.write("| tool;test_index | status | error (truncated) |\n|---|---|---|\n")
+                for name, status, error in sorted(failing):
+                    out.write(f"| `{name}` | {status} | {error} |\n")
+        print(f"ran={len(tests)} failing={len(failing)}")
+        PY
+    - name: Publish the report to the step summary
+      if: ${{ always() }}
+      run: cat failures.md >> $GITHUB_STEP_SUMMARY
+    - name: Upload the report
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: 'Failing tool tests'
+        path: failures.md
